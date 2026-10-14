@@ -1,0 +1,5 @@
+venv/
+__pycache__/
+*.db
+app/artifacts/
+.ipynb_checkpoints/

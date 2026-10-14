@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Loan Approval Predictor</title>
+<script src='https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js'></script>
+<style>
+  :root { --bg:#eef1f5; --panel:#ffffff; --ink:#14213d; --muted:#5f6b7d; --line:#d5dbe4; --accent:#1b6ca8; --ok:#2a9d6f; --bad:#d1495b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  header { padding:28px 5vw 8px; }
+  h1 { margin:0; font-size:clamp(26px,4vw,40px); }
+  header p { color:var(--muted); margin:6px 0 0; max-width:62ch; }
+  main { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; padding:16px 5vw 48px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; }
+  h2 { margin:0 0 12px; font-size:16px; }
+  .form { grid-column:span 4; }
+  .result { grid-column:span 8; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; min-height:260px; }
+  .kpis { grid-column:span 12; display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:16px; background:none; border:0; padding:0; }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px 16px; }
+  .kpi b { display:block; font-size:24px; } .kpi span { color:var(--muted); font-size:13px; }
+  .c4 { grid-column:span 4; } .c6 { grid-column:span 6; } .c12 { grid-column:span 12; }
+  @media (max-width:900px) { .form,.result,.c4,.c6 { grid-column:span 12; } }
+  label { display:block; margin:8px 0 2px; color:var(--muted); font-size:13px; }
+  input, select { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; color:var(--ink); }
+  button { margin-top:14px; width:100%; padding:11px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:600 15px system-ui; cursor:pointer; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline:3px solid #f2b134; outline-offset:1px; }
+  .big { font-size:clamp(56px,10vw,110px); font-weight:800; line-height:1; }
+  .pill { display:inline-block; padding:4px 14px; border-radius:99px; color:#fff; font-weight:600; margin-top:8px; }
+  .good { background:var(--ok); } .badc { background:var(--bad); }
+  .reasons { text-align:left; max-width:52ch; color:var(--muted); }
+  .note { color:var(--muted); font-size:13px; margin-top:10px; }
+  .err { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; } .wrap { overflow-x:auto; } canvas { max-height:260px; }
+  .cm { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .cm div { padding:14px; border-radius:8px; background:var(--bg); text-align:center; font-size:13px; } .cm b { display:block; font-size:24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Loan Approval Predictor</h1>
+  <p>An educational demo. Enter an application to see how likely a model trained on past loans is to approve it. This is not a real lending decision.</p>
+</header>
+<main>
+  <section class='kpis' id='kpis'></section>
+
+  <section class='form'>
+    <h2>Application details</h2>
+    <label for='label'>Applicant label (use a fake name)</label><input id='label' value='Demo applicant'>
+    <label for='applicant_income'>Applicant monthly income</label><input id='applicant_income' type='number' value='5000' min='0'>
+    <label for='coapplicant_income'>Co-applicant monthly income</label><input id='coapplicant_income' type='number' value='1500' min='0'>
+    <label for='loan_amount'>Loan amount (in thousands)</label><input id='loan_amount' type='number' value='130' min='1'>
+    <label for='loan_term'>Loan term (months)</label><input id='loan_term' type='number' value='360' min='12' max='480'>
+    <label for='credit_history'>Credit history</label>
+    <select id='credit_history'><option value='1'>Good record</option><option value='0'>No clean record</option></select>
+    <label for='dependents'>Dependents</label><select id='dependents'></select>
+    <label for='education'>Education</label><select id='education'></select>
+    <label for='self_employed'>Self employed</label><select id='self_employed'></select>
+    <label for='property_area'>Property area</label><select id='property_area'></select>
+    <button id='go'>Check application</button>
+  </section>
+
+  <section class='result' id='result'>
+    <p style='color:var(--muted)'>Fill in the details and select Check application.</p>
+  </section>
+
+  <section class='c4'><h2>Approval rate by credit history</h2><canvas id='ch1'></canvas></section>
+  <section class='c4'><h2>Approval rate by property area</h2><canvas id='ch2'></canvas></section>
+  <section class='c4'><h2>What the model relies on</h2><canvas id='ch3'></canvas></section>
+  <section class='c4'><h2>ROC curve (test set)</h2><canvas id='ch4'></canvas></section>
+  <section class='c4'><h2>Confusion matrix (test set)</h2><div class='cm' id='cm'></div></section>
+  <section class='c4'><h2>Applications you have checked</h2><canvas id='ch5'></canvas></section>
+  <section class='c12'><h2>Models compared (cross-validated ROC-AUC, higher is better)</h2><div class='wrap'><table id='cmp'></table></div></section>
+  <section class='c12'><h2>Recent checks (saved in the database)</h2><div class='wrap'><table id='hist'></table></div></section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const pct = v => (v * 100).toFixed(1) + '%';
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const COLORS = { blue: '#1b6ca8', ok: '#2a9d6f', bad: '#d1495b', amber: '#f2b134' };
+let metrics, doughnut;
+
+function bar(id, labels, data, color, horizontal, asPercent) {
+  new Chart($(id), { type: 'bar', data: { labels, datasets: [{ data, backgroundColor: color }] },
+    options: { indexAxis: horizontal ? 'y' : 'x', plugins: { legend: { display: false } },
+      scales: asPercent ? { y: { min: 0, max: 1, ticks: { callback: v => pct(v) } } } : {} } });
+}
+
+async function init() {
+  metrics = await (await fetch('/api/metrics')).json();
+  ['dependents', 'education', 'self_employed', 'property_area'].forEach(k => {
+    $(k).innerHTML = metrics.options[k].map(v => '<option>' + v + '</option>').join('');
+  });
+  const t = metrics.test;
+  $('kpis').innerHTML = [
+    ['Best model', metrics.best_model], ['Accuracy', pct(t.accuracy)], ['Always-approve baseline', pct(metrics.baseline_accuracy)],
+    ['Precision', pct(t.precision)], ['Recall', pct(t.recall)], ['F1', t.f1], ['ROC-AUC', t.roc_auc]
+  ].map(([a, b]) => '<div class="kpi"><b>' + b + '</b><span>' + a + '</span></div>').join('');
+
+  const i = metrics.insights;
+  bar('ch1', Object.keys(i.by_credit), Object.values(i.by_credit), COLORS.blue, false, true);
+  bar('ch2', Object.keys(i.by_area), Object.values(i.by_area), COLORS.amber, false, true);
+  bar('ch3', metrics.importance.map(f => f.feature), metrics.importance.map(f => f.importance), COLORS.blue, true, false);
+
+  new Chart($('ch4'), { type: 'scatter', data: { datasets: [
+    { label: 'Model', type: 'line', data: metrics.roc.fpr.map((x, k) => ({ x, y: metrics.roc.tpr[k] })), borderColor: COLORS.blue, pointRadius: 0 },
+    { label: 'Coin flip', type: 'line', data: [{ x: 0, y: 0 }, { x: 1, y: 1 }], borderColor: COLORS.bad, borderDash: [6, 4], pointRadius: 0 }
+  ] }, options: { scales: { x: { min: 0, max: 1, title: { display: true, text: 'False positive rate' } }, y: { min: 0, max: 1, title: { display: true, text: 'True positive rate' } } } } });
+
+  const [[tn, fp], [fn, tp]] = metrics.confusion_matrix;
+  $('cm').innerHTML = '<div><b>' + tn + '</b>Rejected, predicted rejected</div><div><b>' + fp + '</b>Rejected, predicted approved</div>' +
+    '<div><b>' + fn + '</b>Approved, predicted rejected</div><div><b>' + tp + '</b>Approved, predicted approved</div>';
+
+  $('cmp').innerHTML = '<tr><th>Model</th><th>Cross-validated ROC-AUC</th></tr>' +
+    metrics.comparison.map(r => '<tr><td>' + r.model + '</td><td>' + r.cv_auc + '</td></tr>').join('');
+  refresh();
+}
+
+async function refresh() {
+  const [h, s] = await Promise.all(['history', 'stats'].map(p => fetch('/api/' + p).then(r => r.json())));
+  if (doughnut) doughnut.destroy();
+  doughnut = new Chart($('ch5'), { type: 'doughnut', data: { labels: ['Likely approved', 'Likely rejected'],
+    datasets: [{ data: [s.approved, s.rejected], backgroundColor: [COLORS.ok, COLORS.bad] }] } });
+  $('hist').innerHTML = '<tr><th>Applicant</th><th>Monthly income</th><th>Loan (thousands)</th><th>Credit</th><th>Probability</th><th>Decision</th></tr>' +
+    (h.length ? h.map(x => '<tr><td>' + esc(x.label) + '</td><td>' + x.income.toLocaleString('en-IN') + '</td><td>' + x.loan_amount +
+      '</td><td>' + (x.credit_history ? 'Good' : 'No clean record') + '</td><td>' + pct(x.probability) + '</td><td>' + x.decision + '</td></tr>').join('')
+    : '<tr><td colspan="6">No checks yet. Check an application to start the log.</td></tr>');
+}
+
+$('go').onclick = async () => {
+  const body = {
+    label: $('label').value || 'Applicant',
+    applicant_income: Number($('applicant_income').value), coapplicant_income: Number($('coapplicant_income').value),
+    loan_amount: Number($('loan_amount').value), loan_term: Number($('loan_term').value),
+    credit_history: Number($('credit_history').value), dependents: $('dependents').value,
+    education: $('education').value, self_employed: $('self_employed').value, property_area: $('property_area').value
+  };
+  const r = await fetch('/api/predict', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) {
+    $('result').innerHTML = '<p class="err">Please check the form: incomes cannot be negative, total income must be above 0, the loan amount must be above 0 and the term must be 12 to 480 months.</p>';
+    return;
+  }
+  const d = await r.json();
+  const good = d.decision === 'Likely approved';
+  $('result').innerHTML = '<div class="big" style="color:var(--' + (good ? 'ok' : 'bad') + ')">' + pct(d.probability) + '</div>' +
+    '<p>estimated chance of approval</p><span class="pill ' + (good ? 'good' : 'badc') + '">' + d.decision + '</span>' +
+    '<h3>Things to review</h3><ul class="reasons">' + d.reasons.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul>' +
+    '<p class="note">Educational demo only. Not financial advice or a real lending decision.</p>';
+  refresh();
+};
+init();
+</script>
+</body>
+</html>
